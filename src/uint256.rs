@@ -17,6 +17,13 @@ impl Uint256 {
             big_uint: BigUint::from_bytes_be(bytes),
         }
     }
+    pub fn to_bytes_be(&self) -> Vec<u8> {
+        self.big_uint.to_bytes_be()
+    }
+
+    pub fn to_string(&self) -> String {
+        self.big_uint.to_string()
+    }
 }
 
 impl Add for Uint256 {

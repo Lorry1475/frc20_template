@@ -1,4 +1,6 @@
 mod blockstore;
+mod state;
+mod types;
 mod uint256;
 use crate::blockstore::Blockstore;
 use cid::multihash::Code;
@@ -9,80 +11,149 @@ use fvm_sdk as sdk;
 use fvm_sdk::message::NO_DATA_BLOCK_ID;
 use fvm_shared::bigint::BigUint;
 use fvm_shared::ActorID;
+use state::{State, Token};
 use std::collections::HashMap;
+use types::{Allowance, Approve, Mint, Transfer, TransferFrom};
 use uint256::Uint256;
-/// A macro to abort concisely.
-/// This should be part of the SDK as it's very handy.
-macro_rules! abort {
-    ($code:ident, $msg:literal $(, $ex:expr)*) => {
-        fvm_sdk::vm::abort(
-            fvm_shared::error::ExitCode::$code.value(),
-            Some(format!($msg, $($ex,)*).as_str()),
-        )
-    };
-}
-#[derive(Serialize_tuple, Deserialize_tuple, Clone, Debug, Default)]
-pub struct Token {
-    pub symbol: String,
-    pub decimal: u64,
-    pub total_supply: Uint256,
-}
-
-#[derive(Serialize_tuple, Deserialize_tuple, Clone, Debug, Default)]
-pub struct State {
-    pub token: Token,
-    pub balance_of: HashMap<ActorID, Uint256>,
-    pub allowance: HashMap<ActorID, HashMap<ActorID, Uint256>>,
-}
-
-/// We should probably have a derive macro to mark an object as a state object,
-/// and have load and save methods automatically generated for them as part of a
-/// StateObject trait (i.e. impl StateObject for State).
-impl State {
-    pub fn load() -> Self {
-        // First, load the current state root.
-        let root = match sdk::sself::root() {
-            Ok(root) => root,
-            Err(err) => abort!(USR_ILLEGAL_STATE, "failed to get root: {:?}", err),
-        };
-
-        // Load the actor state from the state tree.
-        match Blockstore.get_cbor::<Self>(&root) {
-            Ok(Some(state)) => state,
-            Ok(None) => abort!(USR_ILLEGAL_STATE, "state does not exist"),
-            Err(err) => abort!(USR_ILLEGAL_STATE, "failed to get state: {}", err),
-        }
-    }
-
-    pub fn save(&self) -> Cid {
-        let serialized = match to_vec(self) {
-            Ok(s) => s,
-            Err(err) => abort!(USR_SERIALIZATION, "failed to serialize state: {:?}", err),
-        };
-        let serialized = serialized.as_slice();
-        let cid = match sdk::ipld::put(Code::Blake2b256.into(), 32, DAG_CBOR, &serialized) {
-            Ok(cid) => cid,
-            Err(err) => abort!(USR_SERIALIZATION, "failed to store initial state: {:}", err),
-        };
-        if let Err(err) = sdk::sself::set_root(&cid) {
-            abort!(USR_ILLEGAL_STATE, "failed to set root ciid: {:}", err);
-        }
-        // abort!(USR_ILLEGAL_STATE, "failed to set root ciid:");
-        cid
-    }
-}
+#[macro_use]
+mod abort;
 
 #[no_mangle]
 pub fn invoke(params: Vec<u8>) -> u32 {
     let ret: Option<RawBytes> = match sdk::message::method_number() {
         1 => {
-            let mut state = State::load();
+            // create token(symbol,decimal,total_supply)
+            let mock_total_supply =
+                BigUint::parse_bytes(b"100000000000000000000000000000000", 10).unwrap();
+            let mock_total_supply = Uint256 {
+                big_uint: mock_total_supply,
+            };
+            let mock_token = Token {
+                symbol: "wfil".to_string(),
+                decimal: 18,
+                total_supply: mock_total_supply,
+            };
+
+            let params = serde_json::to_vec(&mock_token).unwrap();
+            let mut state = State::default();
             let token: Token = serde_json::from_slice(&params).unwrap();
-            let result = constructor(&mut state, token);
+            let result = state.constructor(token);
             state.save();
             result
         }
-        //2 => balance_of(),
+        2 => {
+            // mint
+            let mock_value = BigUint::parse_bytes(b"4546347290348029834222344344", 10).unwrap();
+            let mock_amount = Uint256 {
+                big_uint: mock_value,
+            };
+            unsafe {
+                let mock_actor = sdk::sys::message::caller().unwrap();
+                let mock_mint = Mint {
+                    actor: mock_actor,
+                    amount: mock_amount,
+                };
+
+                let params = serde_json::to_vec(&mock_mint).unwrap();
+                let mint = Mint::from_slice(&params).unwrap();
+                let mut state = State::load();
+                let res = state.mint(mint.actor, mint.amount);
+                state.save();
+                res
+            }
+        }
+        3 => {
+            //  actor balance
+            unsafe {
+                let mock_actor = sdk::sys::message::caller().unwrap();
+                let state = State::load();
+                let balance = state.balance_of(mock_actor);
+                Some(RawBytes::new(balance.to_string().as_bytes().to_vec()))
+            }
+        }
+        4 => {
+            unsafe {
+                //  allowance
+                let mock_actor = sdk::sys::message::caller().unwrap();
+                let mock_approve = Allowance {
+                    from: mock_actor,
+                    to: 2u64,
+                };
+                let state = State::load();
+                let amount = state.allowance(&mock_approve.from, &mock_approve.to);
+                Some(RawBytes::new(amount.to_string().as_bytes().to_vec()))
+            }
+        }
+        5 => {
+            unsafe {
+                // transfer_from
+                let mock_value = BigUint::parse_bytes(b"45463475445", 10).unwrap();
+                let mock_amount = Uint256 {
+                    big_uint: mock_value,
+                };
+                let mock_actor = sdk::sys::message::caller().unwrap();
+                let mock_transfer_from = TransferFrom {
+                    from: mock_actor,
+                    to: 2u64,
+                    amount: mock_amount,
+                };
+
+                let mut state = State::load();
+                let res = state.transfer_from(
+                    mock_transfer_from.from,
+                    mock_transfer_from.to,
+                    mock_transfer_from.amount,
+                );
+                state.save();
+                res
+            }
+        }
+        6 => {
+            // transfer
+
+            //let transfer = Transfer::from_slice(&params).unwrap();
+            let mock_value = BigUint::parse_bytes(b"454634729034802983", 10).unwrap();
+            let mock_amount = Uint256 {
+                big_uint: mock_value,
+            };
+            let mock_transfer = Transfer {
+                to: 2u64,
+                amount: mock_amount,
+            };
+            let mut state = State::load();
+            let res = state.transfer(mock_transfer.to, mock_transfer.amount);
+            state.save();
+            res
+        }
+        7 => {
+            let mock_value = BigUint::parse_bytes(b"454634729034802983", 10).unwrap();
+            let mock_amount = Uint256 {
+                big_uint: mock_value,
+            };
+            let mock_approve = Approve {
+                actor: 2u64,
+                amount: mock_amount,
+            };
+            let mut state = State::load();
+            let res = state.approve(mock_approve.actor, mock_approve.amount);
+            state.save();
+            res
+        }
+        8 => {
+            // token symbol
+            let state = State::load();
+            Some(RawBytes::new(state.symbol().into_bytes()))
+        }
+        9 => {
+            //  token decimal
+            let state = State::load();
+            Some(RawBytes::new(state.decimal().to_be_bytes().to_vec()))
+        }
+        10 => {
+            //  token total_sypply
+            let state = State::load();
+            Some(RawBytes::new(state.total_supply().to_bytes_be()))
+        }
         _ => abort!(USR_UNHANDLED_MESSAGE, "unrecognized method"),
     };
 
@@ -93,146 +164,6 @@ pub fn invoke(params: Vec<u8>) -> u32 {
             Err(err) => abort!(USR_SERIALIZATION, "failed to store return value: {}", err),
         },
     }
-}
-
-pub fn constructor(state: &mut State, token: Token) -> Option<RawBytes> {
-    state.token = token;
-    state.balance_of = HashMap::new();
-    state.allowance = HashMap::new();
-    None
-}
-
-pub fn symbol(state: &State) -> String {
-    state.token.symbol.clone()
-}
-
-pub fn decimal(state: &State) -> u64 {
-    state.token.decimal
-}
-
-pub fn total_supply(state: &State) -> Uint256 {
-    state.token.total_supply.clone()
-}
-
-pub fn mint(state: &mut State, actor: ActorID, amount: Uint256) -> Option<RawBytes> {
-    let mut default_balance: Uint256 = Default::default();
-    match state.balance_of.get_mut(&actor) {
-        None => {
-            state.balance_of.insert(actor, amount);
-        }
-        Some(balance) => {
-            *balance = balance.clone() + amount;
-        }
-    };
-    None
-}
-
-pub fn balance_of(state: &State, actor: ActorID) -> Uint256 {
-    let default_balance = Uint256::default();
-
-    let balacnce = state.balance_of.get(&actor).unwrap_or(&default_balance);
-    balacnce.clone()
-}
-
-pub unsafe fn transfer(state: &mut State, to: ActorID, amount: Uint256) -> Option<RawBytes> {
-    //let from = sdk::sys::message::caller().unwrap();
-    let from: ActorID = 1u64;
-    let mut from_default_balance = Uint256::default();
-
-    let from_balance = state.balance_of.get_mut(&from);
-    match from_balance {
-        None => {
-            abort!(SYS_ASSERTION_FAILED, "Insufficient Balance");
-        }
-        Some(from_balance) => {
-            if *from_balance < amount {
-                abort!(SYS_ASSERTION_FAILED, "Insufficient Balance")
-            }
-            *from_balance = from_balance.clone() - amount.clone();
-        }
-    }
-
-    match state.balance_of.get_mut(&to) {
-        None => {
-            state.balance_of.insert(to, amount);
-        }
-        Some(to_balance) => {
-            *to_balance = to_balance.clone() + amount.clone();
-        }
-    }
-
-    None
-}
-
-pub unsafe fn approve(state: &mut State, to: ActorID, amount: Uint256) -> Option<RawBytes> {
-    //let from = sdk::sys::message::caller().unwrap();
-    let from: ActorID = 1u64;
-    let default_balance = Uint256::default();
-    let from_balance = state
-        .balance_of
-        .get(&from)
-        .unwrap_or(&default_balance)
-        .clone();
-    if from_balance < amount {
-        abort!(SYS_ASSERTION_FAILED, "Insufficient Balance")
-    }
-    if let None = state.allowance.get_mut(&from) {
-        state.allowance.insert(from, HashMap::new());
-    }
-    state.allowance.get_mut(&from).unwrap().insert(to, amount);
-    None
-}
-
-pub fn allowance(state: &State, from: &ActorID, to: &ActorID) -> Uint256 {
-    //let from = sdk::sys::message::caller().unwrap();
-
-    match state.allowance.get(from) {
-        None => return Uint256::default(),
-        Some(allow) => match allow.get(to) {
-            None => return Uint256::default(),
-            Some(balance) => return balance.clone(),
-        },
-    }
-}
-
-pub unsafe fn transfer_from(
-    state: &mut State,
-    from: ActorID,
-    to: ActorID,
-    amount: Uint256,
-) -> Option<RawBytes> {
-    match state.allowance.get_mut(&from) {
-        None => {
-            abort!(SYS_ASSERTION_FAILED, "Insufficient Balance");
-        }
-        Some(allowance) => {
-            let mut allowance_default_balance: Uint256 = Default::default();
-            match allowance.get_mut(&to) {
-                None => {
-                    abort!(SYS_ASSERTION_FAILED, "Insufficient Balance");
-                }
-                Some(value) => {
-                    if *value < amount {
-                        abort!(SYS_ASSERTION_FAILED, "Insufficient Balance")
-                    }
-                    let from_balance = state.balance_of.get_mut(&from).unwrap();
-                    *from_balance = from_balance.clone() - amount.clone();
-
-                    match state.balance_of.get_mut(&to) {
-                        None => {
-                            state.balance_of.insert(to, amount);
-                        }
-                        Some(to_balance) => {
-                            *to_balance = to_balance.clone() + amount.clone();
-                            *value = value.clone() - amount;
-                        }
-                    }
-                }
-            }
-        }
-    };
-
-    None
 }
 
 #[cfg(test)]
@@ -259,9 +190,9 @@ mod uint256_test {
                 decimal: 18u64,
                 total_supply: total_supply,
             };
-            constructor(&mut state, token);
-            mint(&mut state, actor, amount.clone());
-            let balance = balance_of(&state, actor);
+            state.constructor(token);
+            state.mint(actor, amount.clone());
+            let balance = state.balance_of(actor);
             assert_eq!(balance, amount);
 
             let to_actor: ActorID = 2u64;
@@ -271,11 +202,11 @@ mod uint256_test {
                 big_uint: value.clone(),
             };
 
-            let from_old_balance = balance_of(&state, actor);
-            let to_old_balance = balance_of(&state, to_actor);
-            transfer(&mut state, to_actor, amount.clone());
-            let from_balance = balance_of(&state, actor);
-            let to_balance = balance_of(&state, to_actor);
+            let from_old_balance = state.balance_of(actor);
+            let to_old_balance = state.balance_of(to_actor);
+            state.transfer(to_actor, amount.clone());
+            let from_balance = state.balance_of(actor);
+            let to_balance = state.balance_of(to_actor);
             assert_eq!(from_old_balance, from_balance + amount.clone());
             assert_eq!(to_balance, to_old_balance + amount.clone());
 
@@ -283,22 +214,22 @@ mod uint256_test {
             let amount = Uint256 {
                 big_uint: value.clone(),
             };
-            approve(&mut state, to_actor, amount.clone());
+            state.approve(to_actor, amount.clone());
 
-            let allowance_balance = allowance(&state, &actor, &to_actor);
+            let allowance_balance = state.allowance(&actor, &to_actor);
             assert_eq!(allowance_balance, amount);
 
             let value = BigUint::parse_bytes(b"454634729034", 10).unwrap();
             let amount = Uint256 {
                 big_uint: value.clone(),
             };
-            let from_old_balance = balance_of(&state, actor);
-            let to_old_balance = balance_of(&state, to_actor);
-            let allowance_old = allowance(&state, &actor, &to_actor);
-            transfer_from(&mut state, actor, to_actor, amount.clone());
-            let from_balance = balance_of(&state, actor);
-            let to_balance = balance_of(&state, to_actor);
-            let allowance = allowance(&state, &actor, &to_actor);
+            let from_old_balance = state.balance_of(actor);
+            let to_old_balance = state.balance_of(to_actor);
+            let allowance_old = state.allowance(&actor, &to_actor);
+            state.transfer_from(actor, to_actor, amount.clone());
+            let from_balance = state.balance_of(actor);
+            let to_balance = state.balance_of(to_actor);
+            let allowance = state.allowance(&actor, &to_actor);
             assert_eq!(from_old_balance, from_balance + amount.clone());
             assert_eq!(to_balance, to_old_balance + amount.clone());
             assert_eq!(allowance_old, allowance + amount.clone());
