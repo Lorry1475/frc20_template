@@ -1,4 +1,5 @@
 use crate::blockstore::Blockstore;
+use crate::types::{MintLog, TransferLog};
 use crate::uint256::Uint256;
 use cid::multihash::Code;
 use cid::Cid;
@@ -78,17 +79,18 @@ impl State {
         self.token.total_supply.clone()
     }
 
-    pub fn mint(&mut self, actor: ActorID, amount: Uint256) -> Option<RawBytes> {
+    pub fn mint(&mut self, actor: ActorID, amount: Uint256) -> MintLog {
         let mut default_balance: Uint256 = Default::default();
         match self.balance_of.get_mut(&actor) {
             None => {
-                self.balance_of.insert(actor, amount);
+                self.balance_of.insert(actor, amount.clone());
             }
             Some(balance) => {
-                *balance = balance.clone() + amount;
+                *balance = balance.clone() + amount.clone();
             }
         };
-        None
+
+        MintLog::new(actor, amount)
     }
 
     pub fn balance_of(&self, actor: ActorID) -> Uint256 {
@@ -97,7 +99,7 @@ impl State {
         balacnce.clone()
     }
 
-    pub fn transfer(&mut self, to: ActorID, amount: Uint256) -> Option<RawBytes> {
+    pub fn transfer(&mut self, to: ActorID, amount: Uint256) -> TransferLog {
         unsafe {
             let from = sdk::sys::message::caller().unwrap();
 
@@ -118,14 +120,14 @@ impl State {
 
             match self.balance_of.get_mut(&to) {
                 None => {
-                    self.balance_of.insert(to, amount);
+                    self.balance_of.insert(to, amount.clone());
                 }
                 Some(to_balance) => {
                     *to_balance = to_balance.clone() + amount.clone();
                 }
             }
 
-            None
+            TransferLog::new(from, to, amount)
         }
     }
 
@@ -160,12 +162,7 @@ impl State {
         }
     }
 
-    pub fn transfer_from(
-        &mut self,
-        from: ActorID,
-        to: ActorID,
-        amount: Uint256,
-    ) -> Option<RawBytes> {
+    pub fn transfer_from(&mut self, from: ActorID, to: ActorID, amount: Uint256) -> TransferLog {
         unsafe {
             match self.allowance.get_mut(&from) {
                 None => {
@@ -186,11 +183,11 @@ impl State {
 
                             match self.balance_of.get_mut(&to) {
                                 None => {
-                                    self.balance_of.insert(to, amount);
+                                    self.balance_of.insert(to, amount.clone());
                                 }
                                 Some(to_balance) => {
                                     *to_balance = to_balance.clone() + amount.clone();
-                                    *value = value.clone() - amount;
+                                    *value = value.clone() - amount.clone();
                                 }
                             }
                         }
@@ -198,7 +195,7 @@ impl State {
                 }
             };
 
-            None
+            TransferLog::new(from, to, amount)
         }
     }
 }

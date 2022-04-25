@@ -1,5 +1,5 @@
-cid := bafk2bzaced7lpqffeqjtwnctxiarkq5egskx6uvvofhfsn6xdwsft7b65xbnq
-address := t01008
+cid := bafk2bzacebsyk4mjh6cc6crhin4be6vjsbvy52yyt4ztgcew6ddzxu3ckjr3u
+address := t01002
 invoke := lotus chain invoke
 .PHONY: install-actor
 build:
@@ -22,7 +22,7 @@ allowance:
 
 transfer_from:
 	$(invoke) $(address) 5 ""
-	
+
 transfer:
 	$(invoke) $(address) 6 ""
 

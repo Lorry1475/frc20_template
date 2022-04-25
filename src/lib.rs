@@ -59,7 +59,7 @@ pub fn invoke(params: Vec<u8>) -> u32 {
                 let mut state = State::load();
                 let res = state.mint(mint.actor, mint.amount);
                 state.save();
-                res
+                Some(RawBytes::new(res.to_bytes()))
             }
         }
         3 => {
@@ -105,7 +105,7 @@ pub fn invoke(params: Vec<u8>) -> u32 {
                     mock_transfer_from.amount,
                 );
                 state.save();
-                res
+                Some(RawBytes::new(res.to_bytes()))
             }
         }
         6 => {
@@ -123,7 +123,7 @@ pub fn invoke(params: Vec<u8>) -> u32 {
             let mut state = State::load();
             let res = state.transfer(mock_transfer.to, mock_transfer.amount);
             state.save();
-            res
+            Some(RawBytes::new(res.to_bytes()))
         }
         7 => {
             let mock_value = BigUint::parse_bytes(b"454634729034802983", 10).unwrap();

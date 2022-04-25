@@ -59,3 +59,40 @@ impl TransferFrom {
         serde_json::from_slice::<Self>(data)
     }
 }
+#[derive(Serialize, Deserialize, Debug)]
+pub struct MintLog {
+    actor: ActorID,
+    amount: Uint256,
+}
+
+impl MintLog {
+    pub fn new(actor: ActorID, amount: Uint256) -> Self {
+        Self {
+            actor: actor,
+            amount: amount,
+        }
+    }
+    pub fn to_bytes(&self) -> Vec<u8> {
+        serde_json::to_vec(self).unwrap()
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct TransferLog {
+    from: ActorID,
+    to: ActorID,
+    amount: Uint256,
+}
+
+impl TransferLog {
+    pub fn new(from: ActorID, to: ActorID, amount: Uint256) -> Self {
+        Self {
+            from: from,
+            to: to,
+            amount: amount,
+        }
+    }
+    pub fn to_bytes(&self) -> Vec<u8> {
+        serde_json::to_vec(self).unwrap()
+    }
+}
